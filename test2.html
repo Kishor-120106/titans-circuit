@@ -1,0 +1,383 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Titan's Circuit</title>
+  <style>
+    body {
+      background-color: #1c1c2c;
+      color: white;
+      font-family: Arial, sans-serif;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+    }
+
+    h1 {
+      margin-top: 20px;
+    }
+
+    #game-board {
+      position: relative;
+      width: 500px;
+      height: 500px;
+      margin-top: 30px;
+    }
+
+    .node {
+      width: 40px;
+      height: 40px;
+      border-radius: 50%;
+      background-color: #ccc;
+      position: absolute;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: bold;
+      cursor: pointer;
+      transition: 0.3s;
+    }
+
+    .red {
+      background-color: crimson;
+      color: white;
+    }
+
+    .blue {
+      background-color: royalblue;
+      color: white;
+    }
+
+    .disabled {
+      opacity: 0.3;
+      cursor: not-allowed;
+    }
+
+    .highlight {
+      box-shadow: 0 0 10px 3px yellow;
+    }
+
+    line {
+      stroke-width: 2;
+    }
+
+    svg {
+      position: absolute;
+      width: 100%;
+      height: 100%;
+      z-index: 0;
+    }
+
+    #scoreboard {
+      margin-top: 20px;
+      font-size: 18px;
+    }
+
+    #timers {
+      margin-top: 10px;
+      font-size: 18px;
+    }
+
+    button {
+      margin-top: 20px;
+      padding: 10px 20px;
+      font-size: 16px;
+      cursor: pointer;
+    }
+
+    .red-line {
+      stroke: crimson;
+    }
+
+    .blue-line {
+      stroke: royalblue;
+    }
+
+    .neutral-line {
+      stroke: white;
+    }
+  </style>
+</head>
+<body>
+  <h1>Titan's Circuit</h1>
+  <div id="game-board">
+    <svg id="lines"></svg>
+  </div>
+  <div id="scoreboard">
+    <p>Red: <span id="red-score">0</span> | Blue: <span id="blue-score">0</span></p>
+  </div>
+  <div id="timers">
+    <p>Red Time: <span id="red-timer">2:00</span> | Blue Time: <span id="blue-timer">2:00</span></p>
+  </div>
+  <button onclick="resetGame()">Reset</button>
+
+  <script>
+    const board = document.getElementById("game-board");
+    const svg = document.getElementById("lines");
+    const redScoreSpan = document.getElementById("red-score");
+    const blueScoreSpan = document.getElementById("blue-score");
+    const redTimerSpan = document.getElementById("red-timer");
+    const blueTimerSpan = document.getElementById("blue-timer");
+
+    let currentPlayer = "red";
+    let nodes = [];
+    let edgeElements = [];
+    let scores = { red: 0, blue: 0 };
+
+    let timers = {
+      red: 120,
+      blue: 120
+    };
+    let interval;
+
+    const positions = [];
+    const centerX = 250;
+    const centerY = 250;
+    const radius = [200, 130, 60];
+
+    for (let r = 0; r < 3; r++) {
+      for (let i = 0; i < 6; i++) {
+        const angle = (Math.PI / 3) * i - Math.PI / 2;
+        const x = centerX + radius[r] * Math.cos(angle);
+        const y = centerY + radius[r] * Math.sin(angle);
+        positions.push({ x, y });
+      }
+    }
+
+    const edges = [
+      [0,1,2],[1,2,2],[2,3,2],[3,4,2],[4,5,2],[5,0,2],
+      [6,7,6],[7,8,6],[8,9,6],[9,10,6],[10,11,6],[11,6,6],
+      [12,13,7],[13,14,7],[14,15,7],[15,16,7],[16,17,7],[17,12,7],
+      [0,6,1],[2,8,1],[4,10,1],
+      [6,12,1],[8,14,1],[10,16,1]
+    ];
+
+    const outerIndices = [0, 1, 2, 3, 4, 5];
+    const middleIndices = [6, 7, 8, 9, 10, 11];
+    const innerIndices = [12, 13, 14, 15, 16, 17];
+
+    let redPlaced = 0;
+    let bluePlaced = 0;
+    let selectedNodeIndex = null;
+
+    function startTimer() {
+      if (interval) clearInterval(interval);
+      interval = setInterval(() => {
+        timers[currentPlayer]--;
+        updateTimers();
+        if (timers[currentPlayer] <= 0) {
+          clearInterval(interval);
+          alert(currentPlayer.charAt(0).toUpperCase() + currentPlayer.slice(1) + " ran out of time!");
+          location.reload();
+        }
+      }, 1000);
+    }
+
+    function updateTimers() {
+      redTimerSpan.textContent = formatTime(timers.red);
+      blueTimerSpan.textContent = formatTime(timers.blue);
+    }
+
+    function formatTime(seconds) {
+      const m = Math.floor(seconds / 60);
+      const s = seconds % 60;
+      return `${m}:${s.toString().padStart(2, '0')}`;
+
+    }
+
+    function areConnected(a, b) {
+      return edges.some(edge =>
+        (edge[0] === a && edge[1] === b) ||
+        (edge[0] === b && edge[1] === a)
+      );
+    }
+
+    function createBoard() {
+      board.querySelectorAll(".node").forEach(n => n.remove());
+      svg.innerHTML = "";
+      nodes = [];
+      edgeElements = [];
+
+      for (let i = 0; i < positions.length; i++) {
+        const node = document.createElement("div");
+        node.className = "node";
+        node.style.left = `${positions[i].x - 20}px`;
+        node.style.top = `${positions[i].y - 20}px`;
+
+        node.dataset.index = i;
+        node.onclick = () => handleMove(i);
+        board.appendChild(node);
+        nodes.push({ element: node, player: null });
+      }
+
+      for (let [a, b, weight] of edges) {
+        const line = document.createElementNS("http://www.w3.org/2000/svg", "line");
+        line.setAttribute("x1", positions[a].x);
+        line.setAttribute("y1", positions[a].y);
+        line.setAttribute("x2", positions[b].x);
+        line.setAttribute("y2", positions[b].y);
+        line.classList.add("neutral-line");
+        svg.appendChild(line);
+        edgeElements.push({ a, b, weight, element: line });
+      }
+
+      updateNodeHighlights();
+      updateTimers();
+      startTimer();
+    }
+
+    function isInnerCircuitFull() {
+        return innerIndices.every(index => nodes[index].player !== null);
+    }
+
+    function checkGameOver() {
+        if (isInnerCircuitFull()) {
+            let winner;
+            if (scores.red > scores.blue) winner = "Red";
+            else if (scores.blue > scores.red) winner = "Blue";
+            else winner = "No one"; // tie
+
+            alert(`Game Over! ${winner} wins!\nRed: ${scores.red}, Blue: ${scores.blue}`);
+
+            clearInterval(interval);
+            location.reload();
+        }
+    }
+
+    function handleMove(index) {
+      const node = nodes[index];
+      const totalPlaced = redPlaced + bluePlaced;
+
+      if (totalPlaced < 8) {
+        const outerUsed = nodes.filter((n, i) => outerIndices.includes(i) && n.player === currentPlayer).length;
+        const middleUsed = nodes.filter((n, i) => middleIndices.includes(i) && n.player === currentPlayer).length;
+
+        const inOuter = outerIndices.includes(index);
+        const inMiddle = middleIndices.includes(index);
+
+        if ((inOuter && outerUsed >= 3) || (inMiddle && middleUsed >= 1)) {
+          alert("You've already placed maximum pieces in this ring.");
+          return;
+        }
+
+        if (!(inOuter || inMiddle)) {
+          alert("You can only place in outer or middle ring!");
+          return;
+        }
+
+        if (node.player !== null) return;
+
+        node.player = currentPlayer;
+        node.element.classList.add(currentPlayer);
+
+        if (currentPlayer === "red") redPlaced++;
+        else bluePlaced++;
+
+        updateScores();
+        checkGameOver();
+        currentPlayer = currentPlayer === "red" ? "blue" : "red";
+        updateNodeHighlights();
+        startTimer();
+        return;
+      }
+
+      if (selectedNodeIndex === null) {
+        if (node.player === currentPlayer) {
+          selectedNodeIndex = index;
+          node.element.classList.add("highlight");
+        }
+        return;
+      }
+
+      if (selectedNodeIndex === index) {
+        node.element.classList.remove("highlight");
+        selectedNodeIndex = null;
+        return;
+      }
+
+      if (node.player === null && areConnected(selectedNodeIndex, index)) {
+        nodes[index].player = currentPlayer;
+        nodes[selectedNodeIndex].player = null;
+
+        nodes[index].element.className = "node " + currentPlayer;
+        nodes[selectedNodeIndex].element.className = "node";
+
+        selectedNodeIndex = null;
+        updateScores();
+        checkGameOver();
+        currentPlayer = currentPlayer === "red" ? "blue" : "red";
+        updateNodeHighlights();
+        startTimer();
+      } else {
+        alert("Invalid move! Must move to a connected empty node.");
+      }
+    }
+
+    function updateNodeHighlights() {
+      const totalPlaced = redPlaced + bluePlaced;
+
+      nodes.forEach((node, index) => {
+        node.element.classList.remove("disabled", "highlight");
+
+        if (node.player !== null) {
+          if (totalPlaced >= 8 && node.player === currentPlayer) {
+            node.element.classList.add("highlight");
+          }
+          return;
+        }
+
+        if (totalPlaced < 8) {
+          const outerUsed = nodes.filter((n, i) => outerIndices.includes(i) && n.player === currentPlayer).length;
+          const middleUsed = nodes.filter((n, i) => middleIndices.includes(i) && n.player === currentPlayer).length;
+
+          if ((outerIndices.includes(index) && outerUsed < 3) ||
+              (middleIndices.includes(index) && middleUsed < 1)) {
+            node.element.classList.add("highlight");
+          } else {
+            node.element.classList.add("disabled");
+          }
+        } else {
+          node.element.classList.add("disabled");
+        }
+      });
+    }
+
+    function updateScores() {
+      scores.red = 0;
+      scores.blue = 0;
+
+      edgeElements.forEach(({ a, b, weight, element }) => {
+        const p1 = nodes[a].player;
+        const p2 = nodes[b].player;
+
+        if (p1 && p1 === p2) {
+          scores[p1] += weight;
+          element.classList.remove("neutral-line", "red-line", "blue-line");
+          element.classList.add(p1 + "-line");
+        } else {
+          element.classList.remove("red-line", "blue-line");
+          element.classList.add("neutral-line");
+        }
+      });
+
+      redScoreSpan.textContent = scores.red;
+      blueScoreSpan.textContent = scores.blue;
+    }
+
+    function resetGame() {
+      currentPlayer = "red";
+      redPlaced = 0;
+      bluePlaced = 0;
+      selectedNodeIndex = null;
+      scores = { red: 0, blue: 0 };
+      timers = { red: 120, blue: 120 };
+      clearInterval(interval);
+      createBoard();
+      updateScores();
+    }
+
+    createBoard();
+  </script>
+</body>
+</html>
